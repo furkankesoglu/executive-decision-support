@@ -1,0 +1,17 @@
+(function(root){'use strict';
+const base=Object.freeze({orders:10000,price:120,unitCost:68,staff:42,unitsPerStaff:260,supply:10800,payrollPerStaff:4400,fixed:155000,marketing:48000,cash:350000,ar:210000,inventory:260000,ap:155000});
+const defaults=Object.freeze({demand:100,price:100,cost:100,staff:42,automation:0,supply:100,marketing:100,capex:0,collection:30,payment:30});
+const ranges={demand:[50,160],price:[80,120],cost:[80,150],staff:[20,65],automation:[0,30],supply:[50,150],marketing:[50,150],capex:[0,200000],collection:[15,75],payment:[15,60]};
+function simulate(input={}){
+ const a={...defaults,...input}; for(const [k,[lo,hi]] of Object.entries(ranges)){if(!Number.isFinite(a[k])||a[k]<lo||a[k]>hi)throw Error('Invalid '+k)}
+ if(!Number.isInteger(a.staff))throw Error('Headcount must be an integer');
+ const orders=Math.round(base.orders*a.demand/100),price=base.price*a.price/100,unitCost=base.unitCost*a.cost/100,capacity=Math.floor(a.staff*base.unitsPerStaff*(1+a.automation/100)),supply=Math.floor(base.supply*a.supply/100),shipped=Math.min(orders,capacity,supply),unfilled=orders-shipped;
+ const revenue=shipped*price,cogs=shipped*unitCost,gross=revenue-cogs,payroll=a.staff*base.payrollPerStaff,marketing=base.marketing*a.marketing/100,opex=payroll+marketing+base.fixed,ebitda=gross-opex;
+ // Simplified steady-state working-capital targets from monthly flow rates. Inventory at cost, 15 days of modeled COGS.
+ const ar=revenue*a.collection/30,inventory=cogs*15/30,ap=cogs*a.payment/30,workingCapital=ar+inventory-ap,openingWC=base.ar+base.inventory-base.ap,deltaWC=workingCapital-openingWC,operatingCash=ebitda-deltaWC,closingCash=base.cash+operatingCash-a.capex;
+ const fulfillment=shipped/orders,utilization=shipped/capacity,margin=revenue?ebitda/revenue:0,contribution=price-unitCost,breakEven=contribution>0?Math.ceil(opex/contribution):null;
+ const risks=[];if(closingCash<0)risks.push({level:'Critical',title:'Funding gap',body:'Modeled closing cash is negative. Review collections, payment terms and discretionary spend before committing capital.'});else if(closingCash<opex)risks.push({level:'High',title:'Low liquidity buffer',body:'Closing cash is below one month of modeled operating expenses.'});if(unfilled>0)risks.push({level:'High',title:'Fulfillment constraint',body:(capacity<=supply?'Team capacity':'Available supply')+' limits shipments. '+unfilled.toLocaleString('en-US')+' orders cannot be fulfilled in this period.'});if(ebitda<0)risks.push({level:'High',title:'Operating loss',body:'Modeled gross profit does not cover operating expenses.'});if(a.collection>a.payment)risks.push({level:'Medium',title:'Cash conversion pressure',body:'Collection days exceed supplier payment days. Review receivables and financing.'});if(utilization>.9)risks.push({level:'Medium',title:'Limited operating headroom',body:'More than 90% of modeled team capacity is used.'});if(!risks.length)risks.push({level:'Info',title:'No threshold alerts',body:'Continue monitoring. A deterministic scenario cannot establish business resilience.'});
+ return {a,orders,price,unitCost,capacity,supply,shipped,unfilled,revenue,cogs,gross,payroll,marketing,opex,ebitda,ar,inventory,ap,workingCapital,openingWC,deltaWC,operatingCash,closingCash,fulfillment,utilization,margin,breakEven,risks};
+}
+const api={simulate,base,defaults,ranges};if(typeof module!=='undefined'&&module.exports)module.exports=api;else root.ExecModel=api;
+})(typeof globalThis!=='undefined'?globalThis:this);
